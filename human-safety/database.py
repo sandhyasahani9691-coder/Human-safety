@@ -28,7 +28,7 @@ def init_db():
         )
     """)
 
-    # Table 2: Captured Photo Records (Milestone 3)
+    # Table 2: Captured Photo Records (Milestone 3 & 4)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS photo_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,7 +138,7 @@ def get_incident_counts() -> dict:
 
 
 # ==========================================
-# PHOTO RECORD FUNCTIONS (Milestone 3)
+# PHOTO RECORD FUNCTIONS (Milestone 3 & 4)
 # ==========================================
 
 def create_photo_record(filename: str, label: str) -> dict:
@@ -171,7 +171,7 @@ def create_photo_record(filename: str, label: str) -> dict:
 
 
 def get_recent_photos(limit: int = 4) -> list:
-    """Returns the most recently captured photo records."""
+    """Returns the most recently captured photo records for the camera page."""
     conn = get_db_connection()
     cursor = conn.cursor()
     rows = cursor.execute(
@@ -180,3 +180,57 @@ def get_recent_photos(limit: int = 4) -> list:
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def get_all_photos(search_query: str = "") -> list:
+    """Fetches all photo records with optional keyword search by ID, label, or timestamp."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = "SELECT * FROM photo_records WHERE 1=1"
+    params = []
+
+    if search_query:
+        query += " AND (photo_code LIKE ? OR label LIKE ? OR timestamp LIKE ?)"
+        wildcard = f"%{search_query}%"
+        params.extend([wildcard, wildcard, wildcard])
+
+    query += " ORDER BY id DESC"
+    rows = cursor.execute(query, params).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def update_photo_label(photo_id: int, new_label: str) -> bool:
+    """Updates the user-entered label for a specific photo record."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE photo_records SET label = ? WHERE id = ?",
+        (new_label, photo_id)
+    )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def delete_photo_record(photo_id: int) -> str | None:
+    """Deletes a photo record from SQLite and returns its filename so the file can be removed."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    row = cursor.execute(
+        "SELECT filename FROM photo_records WHERE id = ?",
+        (photo_id,)
+    ).fetchone()
+
+    if not row:
+        conn.close()
+        return None
+
+    filename = row["filename"]
+    cursor.execute("DELETE FROM photo_records WHERE id = ?", (photo_id,))
+    conn.commit()
+    conn.close()
+    return filename

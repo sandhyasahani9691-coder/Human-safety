@@ -128,7 +128,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 const result = await response.json();
 
                 if (result.success) {
-                    // Point image tag to MJPEG route with cache-busting timestamp
                     streamImg.src = "/api/camera/stream?t=" + new Date().getTime();
                     streamImg.classList.remove("hidden");
                     placeholder.classList.add("hidden");
@@ -190,11 +189,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     captureFeedback.innerHTML = `
                         <strong>[${result.photo_code}] Saved Locally!</strong><br>
                         File: <code>static/captures/${result.filename}</code><br>
-                        Label: ${result.label} (${result.timestamp})
+                        Label: ${result.label} (${result.timestamp}) — <a href="/photos" class="inline-link">Manage in Photo Gallery</a>
                     `;
                     if (photoLabelInput) photoLabelInput.value = "";
 
-                    // Remove "No photos" message if present and prepend the new photo card
                     const noPhotosMsg = document.getElementById("no-photos-msg");
                     if (noPhotosMsg) noPhotosMsg.remove();
 
@@ -222,6 +220,72 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
     }
+
+    // ==========================================
+    // 6. PHOTO GALLERY MANAGEMENT (Milestone 4)
+    // ==========================================
+    document.querySelectorAll(".edit-photo-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const photoId = btn.getAttribute("data-id");
+            const photoCode = btn.getAttribute("data-code");
+            const currentLabel = btn.getAttribute("data-label");
+
+            const newLabel = prompt(`Enter a new label for ${photoCode} (max 100 chars):`, currentLabel);
+            if (newLabel === null) return; // User clicked Cancel
+
+            const trimmed = newLabel.trim();
+            if (!trimmed) {
+                alert("Label cannot be empty.");
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/photos/${photoId}/label`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ label: trimmed })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    const labelEl = document.getElementById(`label-text-${photoId}`);
+                    if (labelEl) labelEl.textContent = result.label;
+                    btn.setAttribute("data-label", result.label);
+                } else {
+                    alert("Could not update label: " + (result.error || "Unknown error"));
+                }
+            } catch (err) {
+                alert("Failed to reach backend to update photo label.");
+            }
+        });
+    });
+
+    document.querySelectorAll(".delete-photo-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const photoId = btn.getAttribute("data-id");
+            const photoCode = btn.getAttribute("data-code");
+
+            if (!confirm(`Delete ${photoCode} from SQLite AND permanently delete its .jpg file from static/captures/?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/photos/${photoId}`, {
+                    method: "DELETE"
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    const card = document.getElementById(`photo-card-${photoId}`);
+                    if (card) card.remove();
+                } else {
+                    alert("Could not delete photo: " + (result.error || "Unknown error"));
+                }
+            } catch (err) {
+                alert("Failed to reach backend to delete photo.");
+            }
+        });
+    });
 
     if (refreshBtn) {
         refreshBtn.addEventListener("click", fetchSystemStatus);

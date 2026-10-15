@@ -1,8 +1,9 @@
+import os
 import platform
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, Response
 import database
-from camera_service import camera_manager
+from camera_service import camera_manager, CAPTURE_FOLDER
 
 app = Flask(__name__)
 
@@ -46,6 +47,19 @@ def camera_page():
     )
 
 
+@app.route("/photos")
+def photos_page():
+    """Renders the Dedicated Photo Records Viewer & Gallery page (Milestone 4)."""
+    search_query = request.args.get("q", "").strip()
+    photos = database.get_all_photos(search_query)
+    return render_template(
+        "photos.html",
+        active_page="photos",
+        photos=photos,
+        search_query=search_query
+    )
+
+
 @app.route("/api/status", methods=["GET"])
 def system_status():
     """Returns real-time backend health, camera state, and SQLite counts as JSON."""
@@ -65,6 +79,10 @@ def system_status():
         "photos_total": counts.get("photos", 0)
     })
 
+
+# ==========================================
+# CAMERA & PHOTO RECORD API ROUTES (Milestone 3 & 4)
+# ==========================================
 
 @app.route("/api/camera/start", methods=["POST"])
 def start_camera_route():
@@ -123,6 +141,47 @@ def capture_photo_route():
         "message": message
     })
 
+
+@app.route("/api/photos/<int:photo_id>/label", methods=["POST"])
+def update_photo_label_route(photo_id):
+    """Updates the label of an existing photo record in SQLite."""
+    data = request.get_json(silent=True) or {}
+    new_label = data.get("label", "").strip()
+
+    if not new_label:
+        return jsonify({"success": False, "error": "Label cannot be empty."}), 400
+    if len(new_label) > 100:
+        return jsonify({"success": False, "error": "Label must be 100 characters or less."}), 400
+
+    updated = database.update_photo_label(photo_id, new_label)
+    if updated:
+        return jsonify({"success": True, "label": new_label})
+    return jsonify({"success": False, "error": "Photo record not found."}), 404
+
+
+@app.route("/api/photos/<int:photo_id>", methods=["DELETE"])
+def delete_photo_route(photo_id):
+    """Deletes a photo record from SQLite AND deletes the local .jpg file safely."""
+    filename = database.delete_photo_record(photo_id)
+    if not filename:
+        return jsonify({"success": False, "error": "Photo record not found."}), 404
+
+    # Safely remove the physical .jpg file inside static/captures/
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(CAPTURE_FOLDER, safe_filename)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except OSError as e:
+            print(f"[WARNING] Could not delete file {file_path}: {e}")
+
+    print(f"[PHOTO DELETE] Removed record #{photo_id} and file {safe_filename}")
+    return jsonify({"success": True})
+
+
+# ==========================================
+# INCIDENT API ROUTES (Milestone 2)
+# ==========================================
 
 @app.route("/api/simulate-sos", methods=["POST"])
 def trigger_simulated_sos():

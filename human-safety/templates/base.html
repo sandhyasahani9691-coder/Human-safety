@@ -34,9 +34,9 @@
                     <a href="{{ url_for('camera_page') }}" class="nav-link {% if active_page == 'camera' %}active{% endif %}">
                         3. Camera &amp; Capture
                     </a>
-                    <span class="nav-link disabled" title="Coming in Milestone 4">
-                        4. Photo Records (Milestone 4)
-                    </span>
+                    <a href="{{ url_for('photos_page') }}" class="nav-link {% if active_page == 'photos' %}active{% endif %}">
+                        4. Photo Records
+                    </a>
                 </nav>
             </div>
 
