@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <h2>Incident History &amp; Records</h2>
+        <p class="subtitle">Stored locally in SQLite (safety_records.db) — Protected by .gitignore</p>
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">+ Log New Incident</a>
+</header>
+
+<!-- Search and Filter Bar -->
+<section class="filter-bar">
+    <form method="GET" action="{{ url_for('incidents_page') }}" class="filter-form">
+        <input 
+            type="text" 
+            name="q" 
+            value="{{ search_query }}" 
+            placeholder="Search by ID (INC-0001), type, or description..."
+            class="filter-input"
+        >
+        <select name="status" class="form-select filter-select">
+            <option value="ALL" {% if status_filter == 'ALL' %}selected{% endif %}>All Statuses</option>
+            <option value="OPEN" {% if status_filter == 'OPEN' %}selected{% endif %}>Open Only</option>
+            <option value="RESOLVED" {% if status_filter == 'RESOLVED' %}selected{% endif %}>Resolved Only</option>
+        </select>
+        <button type="submit" class="btn btn-primary">Filter</button>
+        {% if search_query or status_filter != 'ALL' %}
+            <a href="{{ url_for('incidents_page') }}" class="btn btn-secondary">Clear</a>
+        {% endif %}
+    </form>
+</section>
+
+<!-- Incidents Table -->
+<section class="panel">
+    {% if incidents %}
+    <div class="table-responsive">
+        <table class="incident-table">
+            <thead>
+                <tr>
+                    <th>Incident ID</th>
+                    <th>Timestamp</th>
+                    <th>Category</th>
+                    <th>Description / Note</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in incidents %}
+                <tr id="row-{{ item.id }}">
+                    <td class="code-cell">{{ item.incident_code }}</td>
+                    <td class="time-cell">{{ item.timestamp }}</td>
+                    <td><span class="type-tag">{{ item.incident_type }}</span></td>
+                    <td>{{ item.reason }}</td>
+                    <td>
+                        <span class="status-badge {% if item.status == 'OPEN' %}badge-open{% else %}badge-resolved{% endif %}" id="status-badge-{{ item.id }}">
+                            {{ item.status }}
+                        </span>
+                    </td>
+                    <td class="actions-cell">
+                        {% if item.status == 'OPEN' %}
+                        <button class="btn-small btn-resolve toggle-status-btn" data-id="{{ item.id }}" data-next="RESOLVED">
+                            Mark Resolved
+                        </button>
+                        {% else %}
+                        <button class="btn-small btn-reopen toggle-status-btn" data-id="{{ item.id }}" data-next="OPEN">
+                            Reopen
+                        </button>
+                        {% endif %}
+                        <button class="btn-small btn-delete delete-incident-btn" data-id="{{ item.id }}" data-code="{{ item.incident_code }}">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h3>No Incident Records Found</h3>
+        <p>No simulated incidents match your current filter, or the database is empty.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

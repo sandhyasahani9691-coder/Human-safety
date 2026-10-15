@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <h2>System Dashboard</h2>
+        <p class="subtitle">Real-time Python backend telemetry and simulated incident controls</p>
+    </div>
+    <button id="refresh-status-btn" class="btn btn-secondary">Refresh Telemetry</button>
+</header>
+
+<!-- Status Cards Grid -->
+<section class="status-grid">
+    <div class="card">
+        <span class="card-label">Python Backend Status</span>
+        <div class="card-value status-online" id="backend-status">Checking...</div>
+        <p class="card-meta" id="backend-version">Connecting to Flask...</p>
+    </div>
+
+    <div class="card">
+        <span class="card-label">Camera &amp; Sensor Privacy</span>
+        <div class="card-value status-safe" id="camera-status">INACTIVE</div>
+        <p class="card-meta">Hardware locked until user action</p>
+    </div>
+
+    <div class="card">
+        <span class="card-label">Database Engine</span>
+        <div class="card-value status-online" id="db-status">Checking...</div>
+        <p class="card-meta">Local file: safety_records.db</p>
+    </div>
+
+    <div class="card">
+        <span class="card-label">Total Logged Incidents</span>
+        <div class="card-value" id="sos-count">0</div>
+        <p class="card-meta" id="session-time">Session started: --</p>
+    </div>
+</section>
+
+<!-- Interactive Simulated SOS Test Section -->
+<section class="panel-grid">
+    <div class="panel">
+        <h3>Log Simulated Safety Incident</h3>
+        <p class="panel-desc">
+            Create a permanent record in your local SQLite database. 
+            All records are strictly <strong>simulated</strong> and stored only on your laptop.
+        </p>
+
+        <div class="form-group">
+            <label for="sos-type">Incident Category:</label>
+            <select id="sos-type" class="form-select">
+                <option value="SIMULATED_SOS">Simulated SOS Alert (Emergency Test)</option>
+                <option value="SAFETY_CHECK">Routine Safety Check-In</option>
+                <option value="SUSPICIOUS_ACTIVITY_LOG">Unverified Activity Note</option>
+                <option value="SYSTEM_TEST">System Diagnostic Test</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="sos-reason">Incident Description / Context (Max 150 chars):</label>
+            <input 
+                type="text" 
+                id="sos-reason" 
+                placeholder="e.g., Testing SQLite persistence for Milestone 2"
+                maxlength="150"
+            >
+        </div>
+
+        <button id="simulate-sos-btn" class="btn btn-danger">
+            Trigger &amp; Save Simulated Incident
+        </button>
+
+        <!-- Response feedback box -->
+        <div id="sos-feedback" class="feedback-box hidden"></div>
+    </div>
+
+    <div class="panel">
+        <h3>Milestone 2: SQLite Persistence</h3>
+        <ul class="info-list">
+            <li><strong>Permanent Storage:</strong> Records now survive server restarts inside <code>safety_records.db</code>.</li>
+            <li><strong>Input Validation:</strong> The Python backend checks character limits and validates incident categories.</li>
+            <li><strong>Manage Records:</strong> Open the <a href="{{ url_for('incidents_page') }}" class="inline-link">Incident Logs</a> page to search, resolve, or delete records.</li>
+        </ul>
+    </div>
+</section>
+{% endblock %}
