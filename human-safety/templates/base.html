@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Human Safety AI — Class XII Prototype</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Top Prototype Disclaimer Banner -->
+    <div class="prototype-banner">
+        <strong>PROTOTYPE MODE:</strong> Class XII Student Project (Session 2027–28). All SOS alerts are simulated locally. Camera and mic remain OFF until explicitly started.
+    </div>
+
+    <div class="app-container">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div>
+                <div class="brand">
+                    <span class="brand-badge">HS-AI</span>
+                    <div>
+                        <h1>Human Safety AI</h1>
+                        <p>Local Safety Interface</p>
+                    </div>
+                </div>
+
+                <nav class="nav-menu">
+                    <a href="{{ url_for('dashboard') }}" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">
+                        1. Dashboard &amp; Status
+                    </a>
+                    <a href="{{ url_for('incidents_page') }}" class="nav-link {% if active_page == 'incidents' %}active{% endif %}">
+                        2. Incident Logs
+                    </a>
+                    <a href="{{ url_for('camera_page') }}" class="nav-link {% if active_page == 'camera' %}active{% endif %}">
+                        3. Camera &amp; Capture
+                    </a>
+                    <span class="nav-link disabled" title="Coming in Milestone 4">
+                        4. Photo Records (Milestone 4)
+                    </span>
+                </nav>
+            </div>
+
+            <div class="sidebar-footer">
+                <p>Environment: Localhost (127.0.0.1)</p>
+                <p>Database: SQLite (Local)</p>
+                <p>Privacy Guard: Active</p>
+            </div>
+        </aside>
+
+        <!-- Main Page Content -->
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
