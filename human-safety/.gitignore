@@ -1,0 +1,24 @@
+# Python virtual environment
+venv/
+.venv/
+ENV/
+
+# Python byte-compiled files
+__pycache__/
+*.py[cod]
+
+# Local SQLite databases (Privacy Rule: Never push local DB to GitHub)
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Captured user photos (Privacy Rule: Keep captured images local only)
+static/captures/
+captures/
+
+# Environment variables and secrets
+.env
+
+# VS Code personal settings
+.vscode/

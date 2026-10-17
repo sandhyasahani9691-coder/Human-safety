@@ -36,13 +36,14 @@ def incidents_page():
 
 @app.route("/camera")
 def camera_page():
-    """Renders the Camera & Explicit Photo Capture page."""
+    """Renders the Camera, AI Person/Gesture Detection & Explicit Photo Capture page."""
     cam_status = camera_manager.get_status()
     recent_photos = database.get_recent_photos(limit=4)
     return render_template(
         "camera.html",
         active_page="camera",
         camera_active=cam_status["active"],
+        ai_enabled=cam_status["ai_enabled"],
         recent_photos=recent_photos
     )
 
@@ -71,7 +72,7 @@ def system_status():
         "database": f"SQLite ({counts['open']} Open | {counts.get('photos', 0)} Photos)",
         "camera_state": cam_status["state_label"],
         "camera_active": cam_status["active"],
-        "microphone_state": "INACTIVE",
+        "microphone_state": "EXPLICIT BROWSER CONTROL",
         "mode": "PROTOTYPE_SIMULATION",
         "session_started": SESSION_START_TIME,
         "simulated_incidents_total": counts["total"],
@@ -81,7 +82,7 @@ def system_status():
 
 
 # ==========================================
-# CAMERA & PHOTO RECORD API ROUTES (Milestone 3 & 4)
+# CAMERA, AI DETECTION & PHOTO API ROUTES
 # ==========================================
 
 @app.route("/api/camera/start", methods=["POST"])
@@ -99,7 +100,31 @@ def stop_camera_route():
     """Explicitly stops the OpenCV webcam stream and releases hardware."""
     success, message = camera_manager.stop_camera()
     print("[CAMERA] Webcam stopped and hardware released.")
-    return jsonify({"success": success, "active": False, "message": message})
+    return jsonify({"success": success, "active": False, "ai_enabled": False, "message": message})
+
+
+@app.route("/api/camera/ai-toggle", methods=["POST"])
+def toggle_ai_detection_route():
+    """Explicitly turns AI Person & Crossed-Hands Gesture Detection ON or OFF."""
+    data = request.get_json(silent=True) or {}
+    enable_flag = bool(data.get("enabled", False))
+
+    success, message = camera_manager.set_ai_detection(enable_flag)
+    if not success:
+        return jsonify({"success": False, "error": message}), 400
+
+    print(f"[AI VISION] Person & Gesture Detection set to {enable_flag}")
+    return jsonify({
+        "success": True,
+        "ai_enabled": enable_flag,
+        "message": message
+    })
+
+
+@app.route("/api/camera/ai-telemetry", methods=["GET"])
+def ai_telemetry_route():
+    """Returns real-time person count, confidence score, and gesture status."""
+    return jsonify(camera_manager.get_ai_telemetry())
 
 
 @app.route("/api/camera/stream")
@@ -166,7 +191,6 @@ def delete_photo_route(photo_id):
     if not filename:
         return jsonify({"success": False, "error": "Photo record not found."}), 404
 
-    # Safely remove the physical .jpg file inside static/captures/
     safe_filename = os.path.basename(filename)
     file_path = os.path.join(CAPTURE_FOLDER, safe_filename)
     if os.path.exists(file_path):
@@ -180,12 +204,12 @@ def delete_photo_route(photo_id):
 
 
 # ==========================================
-# INCIDENT API ROUTES (Milestone 2)
+# INCIDENT API ROUTES (Milestones 2 & 6)
 # ==========================================
 
 @app.route("/api/simulate-sos", methods=["POST"])
 def trigger_simulated_sos():
-    """Validates input and logs a simulated SOS incident into SQLite."""
+    """Validates input and logs a simulated SOS incident (Manual, Voice, or Gesture) into SQLite."""
     data = request.get_json(silent=True) or {}
     reason = data.get("reason", "").strip()
     incident_type = data.get("incident_type", "SIMULATED_SOS").strip()
@@ -195,7 +219,14 @@ def trigger_simulated_sos():
     if len(reason) > 150:
         return jsonify({"success": False, "error": "Reason must be 150 characters or less."}), 400
 
-    allowed_types = ["SIMULATED_SOS", "SAFETY_CHECK", "SUSPICIOUS_ACTIVITY_LOG", "SYSTEM_TEST"]
+    allowed_types = [
+        "SIMULATED_SOS",
+        "VOICE_SOS",
+        "GESTURE_X_SOS",
+        "SAFETY_CHECK",
+        "SUSPICIOUS_ACTIVITY_LOG",
+        "SYSTEM_TEST"
+    ]
     if incident_type not in allowed_types:
         incident_type = "SIMULATED_SOS"
 
