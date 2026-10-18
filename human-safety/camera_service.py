@@ -4,6 +4,14 @@ import threading
 from datetime import datetime
 import cv2
 
+# 1. Check for Ultralytics YOLOv8 (Primary Production Street Surveillance Engine)
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except ImportError:
+    YOLO_AVAILABLE = False
+
+# 2. Check for MediaPipe (Secondary Fallback)
 try:
     import mediapipe as mp
     MEDIAPIPE_AVAILABLE = True
@@ -15,7 +23,7 @@ os.makedirs(CAPTURE_FOLDER, exist_ok=True)
 
 
 class CameraManager:
-    """Manages explicit webcam access, AI person detection, and Raised Crossed-Hands SOS gesture."""
+    """Production Street Surveillance & Explicit Camera Manager powered by YOLOv8-Pose."""
 
     def __init__(self):
         self.cap = None
@@ -23,37 +31,38 @@ class CameraManager:
         self.latest_frame = None
         self.lock = threading.Lock()
 
-        # Milestone 5 & 6: AI Person + Crossed-Hands Gesture State
+        # AI Surveillance State
         self.ai_enabled = False
         self.person_count = 0
         self.max_confidence = 0.0
         self.last_detection_time = "Never"
         self.frame_counter = 0
-        self.cached_boxes = []
+        self.cached_boxes = []      # Stores (x1, y1, x2, y2, conf, label_tag, is_sos_person)
+        self.cached_skeletons = []  # Stores arm keypoint lines for all detected people
 
-        # Milestone 6: Raised Crossed-Hands ("X") Gesture Tracking
+        # Raised Crossed-Hands ("X") Gesture Tracking
         self.gesture_hold_frames = 0
         self.gesture_detected = False
         self.gesture_confidence = 0.0
         self.gesture_status_text = "No SOS Gesture"
-        self.cached_landmarks = []  # Stores wrist/elbow/shoulder lines for drawing
 
-        # 1. OpenCV HOG + Cascade for Person Presence
+        # Load YOLOv8n-Pose Model (Auto-downloads yolov8n-pose.pt ~6.5MB on first run)
+        self.yolo_model = None
+        self.engine_name = "OpenCV HOG Fallback"
+        if YOLO_AVAILABLE:
+            try:
+                self.yolo_model = YOLO("yolov8n-pose.pt")
+                self.engine_name = "YOLOv8n-Pose (Street Surveillance)"
+                print("[AI ENGINE] YOLOv8n-Pose Street Surveillance Model Loaded Successfully.")
+            except Exception as e:
+                print(f"[AI WARNING] Could not load YOLOv8n-pose: {e}")
+                self.yolo_model = None
+
+        # Fallback detectors if YOLOv8 is not installed yet
         self.hog = cv2.HOGDescriptor()
         self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
         cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
         self.close_range_detector = cv2.CascadeClassifier(cascade_path)
-
-        # 2. MediaPipe Pose for Raised Crossed-Hands Gesture
-        self.pose_detector = None
-        if MEDIAPIPE_AVAILABLE:
-            self.mp_pose = mp.solutions.pose
-            self.pose_detector = self.mp_pose.Pose(
-                static_image_mode=False,
-                model_complexity=0,
-                min_detection_confidence=0.55,
-                min_tracking_confidence=0.55
-            )
 
     def start_camera(self) -> tuple[bool, str]:
         """Explicitly opens the default laptop webcam (index 0)."""
@@ -74,7 +83,7 @@ class CameraManager:
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             self.is_running = True
-            return True, "Camera started by explicit user command."
+            return True, f"Camera started ({self.engine_name})."
 
     def stop_camera(self) -> tuple[bool, str]:
         """Explicitly releases the webcam hardware and resets AI telemetry."""
@@ -85,212 +94,215 @@ class CameraManager:
             self.person_count = 0
             self.max_confidence = 0.0
             self.cached_boxes = []
+            self.cached_skeletons = []
             self.gesture_hold_frames = 0
             self.gesture_detected = False
             self.gesture_confidence = 0.0
             self.gesture_status_text = "No SOS Gesture"
-            self.cached_landmarks = []
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
             return True, "Camera stopped and hardware released."
 
     def set_ai_detection(self, enabled: bool) -> tuple[bool, str]:
-        """Toggles AI Person & Gesture Detection on or off while camera is active."""
+        """Toggles YOLOv8 Street Surveillance & Gesture Detection on or off."""
         with self.lock:
             if not self.is_running:
                 self.ai_enabled = False
-                return False, "Start the camera first before enabling AI Detection."
+                return False, "Start the camera first before enabling YOLOv8 Surveillance."
 
             self.ai_enabled = bool(enabled)
             if not self.ai_enabled:
                 self.person_count = 0
                 self.max_confidence = 0.0
                 self.cached_boxes = []
+                self.cached_skeletons = []
                 self.gesture_hold_frames = 0
                 self.gesture_detected = False
                 self.gesture_confidence = 0.0
                 self.gesture_status_text = "Standby (AI Off)"
-                self.cached_landmarks = []
-                return True, "AI Person & Gesture Detection disabled."
-            return True, "AI Person & Crossed-Hands Gesture Detection enabled."
+                return True, "YOLOv8 Street Surveillance disabled."
+            return True, f"{self.engine_name} enabled."
 
     def get_status(self) -> dict:
-        """Returns whether the webcam and AI module are currently active."""
+        """Returns whether the webcam and YOLOv8 module are currently active."""
         if not self.is_running:
             label = "INACTIVE (Hardware Locked)"
         elif self.ai_enabled:
-            label = f"ACTIVE + AI ON ({self.person_count} Person)"
+            label = f"YOLOv8 ACTIVE ({self.person_count} in View)"
         else:
             label = "ACTIVE (Live Preview On)"
 
         return {
             "active": self.is_running,
             "ai_enabled": self.ai_enabled,
+            "engine_name": self.engine_name,
             "state_label": label
         }
 
     def get_ai_telemetry(self) -> dict:
-        """Returns live AI person count, confidence, and Raised Crossed-Hands gesture state."""
+        """Returns live YOLOv8 multi-person street telemetry and X-gesture status."""
+        if not self.ai_enabled:
+            scene_status = "Standby (AI Off)"
+        elif self.gesture_detected:
+            scene_status = "SOS X-GESTURE IN SCENE (Awaiting Human Confirmation)"
+        elif self.person_count > 3:
+            scene_status = f"HIGH STREET DENSITY ({self.person_count} Pedestrians - Neutral)"
+        elif self.person_count > 0:
+            scene_status = f"ACTIVE STREET MONITOR ({self.person_count} Person - Neutral)"
+        else:
+            scene_status = "CLEAR SECTOR (0 Persons)"
+
         return {
             "camera_active": self.is_running,
             "ai_enabled": self.ai_enabled,
+            "engine_name": self.engine_name,
             "person_count": self.person_count if self.ai_enabled else 0,
             "max_confidence": round(self.max_confidence, 1) if self.ai_enabled else 0.0,
             "last_detection_time": self.last_detection_time,
             "gesture_detected": bool(self.gesture_detected and self.ai_enabled),
             "gesture_confidence": round(self.gesture_confidence, 1) if self.ai_enabled else 0.0,
             "gesture_status": self.gesture_status_text if self.ai_enabled else "Standby (AI Off)",
-            "mediapipe_ready": MEDIAPIPE_AVAILABLE,
-            "classification": (
-                "CROSSED-HANDS SOS GESTURE DETECTED (Awaiting Human Review)"
-                if (self.ai_enabled and self.gesture_detected)
-                else (
-                    "NEUTRAL HUMAN PRESENCE (No Threat Implied)"
-                    if (self.ai_enabled and self.person_count > 0)
-                    else "Monitoring Standby"
-                )
-            )
+            "classification": scene_status
         }
 
-    def _evaluate_crossed_hands_gesture(self, frame):
-        """Uses MediaPipe Pose to detect two hands raised & crossed in an 'X' above shoulders."""
-        if not MEDIAPIPE_AVAILABLE or self.pose_detector is None:
-            self.gesture_status_text = "Install mediapipe for X-Gesture"
-            return
-
-        h, w, _ = frame.shape
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self.pose_detector.process(rgb_frame)
-        self.cached_landmarks = []
-
-        if not results.pose_landmarks:
-            self.gesture_hold_frames = max(0, self.gesture_hold_frames - 1)
-            self.gesture_detected = False
-            self.gesture_status_text = "No Upper-Body Pose"
-            return
-
-        lm = results.pose_landmarks.landmark
-        # Landmark indices: 11=Left Shoulder, 12=Right Shoulder, 13=Left Elbow, 14=Right Elbow, 15=Left Wrist, 16=Right Wrist
-        l_sh, r_sh = lm[11], lm[12]
-        l_el, r_el = lm[13], lm[14]
-        l_wr, r_wr = lm[15], lm[16]
-
-        # Ensure person detection count reflects visible upper body
-        if l_sh.visibility > 0.5 or r_sh.visibility > 0.5:
-            self.person_count = max(self.person_count, 1)
-            pose_conf = round(max(l_sh.visibility, r_sh.visibility) * 95.0, 1)
-            self.max_confidence = max(self.max_confidence, pose_conf)
-
-        # Save arm skeleton lines for visual feedback
-        pts = [
-            ((int(l_sh.x * w), int(l_sh.y * h)), (int(l_el.x * w), int(l_el.y * h))),
-            ((int(l_el.x * w), int(l_el.y * h)), (int(l_wr.x * w), int(l_wr.y * h))),
-            ((int(r_sh.x * w), int(r_sh.y * h)), (int(r_el.x * w), int(r_el.y * h))),
-            ((int(r_el.x * w), int(r_el.y * h)), (int(r_wr.x * w), int(r_wr.y * h)))
-        ]
-        self.cached_landmarks = pts
-
-        # Check visibility of both wrists
-        if l_wr.visibility < 0.45 or r_wr.visibility < 0.45:
-            self.gesture_hold_frames = max(0, self.gesture_hold_frames - 1)
-            self.gesture_detected = False
-            self.gesture_status_text = "Hands Lowered / Not Visible"
-            return
-
-        shoulder_top_y = min(l_sh.y, r_sh.y)
-        shoulder_width = abs(l_sh.x - r_sh.x) + 0.05
-
-        # Rule 1: Both wrists must be raised high (above shoulder level)
-        hands_raised_up = (l_wr.y < shoulder_top_y + 0.04) and (r_wr.y < shoulder_top_y + 0.04)
-
-        # Rule 2: Arms crossed ("X" shape) — wrists cross horizontally or meet closely above head
-        wrist_x_gap = abs(l_wr.x - r_wr.x)
-        # In anatomical landmarks, left shoulder x > right shoulder x in front-facing view.
-        # When arms cross, (l_wr.x - r_wr.x) reverses sign compared to (l_sh.x - r_sh.x), OR wrists overlap tightly.
-        shoulder_sign = 1 if (l_sh.x - r_sh.x) >= 0 else -1
-        wrist_sign = 1 if (l_wr.x - r_wr.x) >= 0 else -1
-        wrists_crossed = (shoulder_sign != wrist_sign) or (wrist_x_gap < shoulder_width * 0.55)
-
-        if hands_raised_up and wrists_crossed:
-            self.gesture_hold_frames = min(15, self.gesture_hold_frames + 2)
-            raw_conf = min(98.0, 75.0 + (self.gesture_hold_frames * 1.5))
-            self.gesture_confidence = round(raw_conf, 1)
-
-            if self.gesture_hold_frames >= 6:
-                self.gesture_detected = True
-                self.gesture_status_text = f"RAISED X-GESTURE ACTIVE ({self.gesture_confidence}%)"
-            else:
-                self.gesture_status_text = f"Holding Raised Cross... ({int(self.gesture_hold_frames * 100 / 6)}%)"
-        else:
-            self.gesture_hold_frames = max(0, self.gesture_hold_frames - 1)
-            if self.gesture_hold_frames == 0:
-                self.gesture_detected = False
-                self.gesture_confidence = 0.0
-                if hands_raised_up:
-                    self.gesture_status_text = "Hands Raised (Cross Arms for SOS)"
-                else:
-                    self.gesture_status_text = "Monitoring (No SOS Gesture)"
-
-    def _run_person_and_gesture_detection(self, frame):
-        """Runs hybrid Person Detection + Raised Crossed-Hands Gesture recognition."""
+    def _run_yolov8_street_surveillance(self, frame):
+        """Runs Ultralytics YOLOv8n-Pose for multi-person street detection & X-gesture recognition."""
         self.frame_counter += 1
+
+        # Run neural network inference every 3rd frame for smooth 25 FPS video on laptop CPU
         if self.frame_counter % 3 == 0:
-            detected = []
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            detected_boxes = []
+            skeleton_lines = []
+            any_person_doing_x_gesture = False
 
-            # A. Full-body HOG Detection
-            rects, weights = self.hog.detectMultiScale(gray, winStride=(8, 8), padding=(8, 8), scale=1.08)
-            for (x, y, w, h), weight in zip(rects, weights):
-                conf = min(98.0, max(55.0, float(weight) * 65.0))
-                if conf >= 58.0:
-                    detected.append((int(x), int(y), int(w), int(h), round(conf, 1), "Full-Body"))
+            if self.yolo_model is not None:
+                results = self.yolo_model.predict(frame, conf=0.40, verbose=False)
+                if len(results) > 0:
+                    res = results[0]
+                    boxes = res.boxes
+                    keypoints = res.keypoints
 
-            # B. Close-range presence detection
-            if len(detected) == 0 and not self.close_range_detector.empty():
-                close_rects, _, level_weights = self.close_range_detector.detectMultiScale3(
-                    gray, scaleFactor=1.15, minNeighbors=5, minSize=(60, 60), outputRejectLevels=True
-                )
-                for (x, y, w, h), weight in zip(close_rects, level_weights):
-                    conf = min(96.0, max(65.0, 60.0 + float(weight) * 8.0))
-                    pad_x, pad_y = int(w * 0.35), int(h * 0.45)
-                    bx, by = max(0, int(x - pad_x)), max(0, int(y - pad_y * 0.3))
-                    bw = min(frame.shape[1] - bx, int(w + pad_x * 2))
-                    bh = min(frame.shape[0] - by, int(h + pad_y * 1.8))
-                    detected.append((bx, by, bw, bh, round(conf, 1), "Close-Range"))
+                    for idx in range(len(boxes)):
+                        box = boxes[idx]
+                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                        conf_pct = round(float(box.conf[0].item()) * 100.0, 1)
+                        person_has_x = False
 
-            self.cached_boxes = detected
-            self.person_count = len(detected)
-            if detected:
-                self.max_confidence = max(item[4] for item in detected)
+                        # Inspect 17 COCO Pose Keypoints for this specific person
+                        # 5: L-Shoulder, 6: R-Shoulder, 7: L-Elbow, 8: R-Elbow, 9: L-Wrist, 10: R-Wrist
+                        if keypoints is not None and keypoints.xy is not None and idx < len(keypoints.xy):
+                            kpts_xy = keypoints.xy[idx].cpu().numpy()
+                            kpts_conf = (
+                                keypoints.conf[idx].cpu().numpy()
+                                if keypoints.conf is not None
+                                else [1.0] * len(kpts_xy)
+                            )
+
+                            if len(kpts_xy) >= 11:
+                                l_sh, r_sh = kpts_xy[5], kpts_xy[6]
+                                l_el, r_el = kpts_xy[7], kpts_xy[8]
+                                l_wr, r_wr = kpts_xy[9], kpts_xy[10]
+
+                                # Save skeleton arm segments if visible
+                                if kpts_conf[5] > 0.35 and kpts_conf[7] > 0.35:
+                                    skeleton_lines.append(((int(l_sh[0]), int(l_sh[1])), (int(l_el[0]), int(l_el[1]))))
+                                if kpts_conf[7] > 0.35 and kpts_conf[9] > 0.35:
+                                    skeleton_lines.append(((int(l_el[0]), int(l_el[1])), (int(l_wr[0]), int(l_wr[1]))))
+                                if kpts_conf[6] > 0.35 and kpts_conf[8] > 0.35:
+                                    skeleton_lines.append(((int(r_sh[0]), int(r_sh[1])), (int(r_el[0]), int(r_el[1]))))
+                                if kpts_conf[8] > 0.35 and kpts_conf[10] > 0.35:
+                                    skeleton_lines.append(((int(r_el[0]), int(r_el[1])), (int(r_wr[0]), int(r_wr[1]))))
+
+                                # Check if both wrists and shoulders are visible
+                                wrists_visible = (
+                                    kpts_conf[9] > 0.35 and kpts_conf[10] > 0.35 and
+                                    l_wr[1] > 0 and r_wr[1] > 0 and l_sh[1] > 0 and r_sh[1] > 0
+                                )
+                                if wrists_visible:
+                                    shoulder_top_y = min(l_sh[1], r_sh[1])
+                                    shoulder_width = abs(l_sh[0] - r_sh[0]) + 15.0
+
+                                    # Rule 1: Both hands raised high (above shoulder level)
+                                    hands_up = (l_wr[1] < shoulder_top_y + 20) and (r_wr[1] < shoulder_top_y + 20)
+
+                                    # Rule 2: Arms crossed into "X" shape or wrists overlapped overhead
+                                    sh_sign = 1 if (l_sh[0] - r_sh[0]) >= 0 else -1
+                                    wr_sign = 1 if (l_wr[0] - r_wr[0]) >= 0 else -1
+                                    wrist_gap = abs(l_wr[0] - r_wr[0])
+                                    crossed = (sh_sign != wr_sign) or (wrist_gap < shoulder_width * 0.60)
+
+                                    if hands_up and crossed:
+                                        person_has_x = True
+                                        any_person_doing_x_gesture = True
+
+                        tag = f"P#{idx + 1} YOLOv8"
+                        detected_boxes.append((x1, y1, x2, y2, conf_pct, tag, person_has_x))
+
+            # Update multi-person counters
+            self.cached_boxes = detected_boxes
+            self.cached_skeletons = skeleton_lines
+            self.person_count = len(detected_boxes)
+
+            if detected_boxes:
+                self.max_confidence = max(item[4] for item in detected_boxes)
                 self.last_detection_time = datetime.now().strftime("%H:%M:%S")
             else:
                 self.max_confidence = 0.0
 
-            # C. Evaluate Raised Crossed-Hands ("X") SOS Gesture
-            self._evaluate_crossed_hands_gesture(frame)
+            # Update Sustained X-Gesture Hold Counter
+            if any_person_doing_x_gesture:
+                self.gesture_hold_frames = min(15, self.gesture_hold_frames + 2)
+                self.gesture_confidence = round(min(99.0, 78.0 + self.gesture_hold_frames * 1.4), 1)
+                if self.gesture_hold_frames >= 6:
+                    self.gesture_detected = True
+                    self.gesture_status_text = f"YOLOv8 X-GESTURE SOS ({self.gesture_confidence}%)"
+                else:
+                    self.gesture_status_text = f"Verifying X-Gesture ({int(self.gesture_hold_frames * 100 / 6)}%)"
+            else:
+                self.gesture_hold_frames = max(0, self.gesture_hold_frames - 1)
+                if self.gesture_hold_frames == 0:
+                    self.gesture_detected = False
+                    self.gesture_confidence = 0.0
+                    self.gesture_status_text = "Monitoring Street Scene (No SOS)"
 
-        # Draw cached person bounding boxes
-        for (x, y, w, h, conf, mode_tag) in self.cached_boxes:
-            box_color = (245, 158, 11) if self.gesture_detected else (56, 189, 248)
-            cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
-            label_str = f"Person ({mode_tag}) | {conf}% [Neutral]"
-            cv2.rectangle(frame, (x, max(0, y - 24)), (x + min(w, 290), y), (15, 23, 42), -1)
-            cv2.putText(frame, label_str, (x + 5, max(15, y - 7)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, box_color, 1, cv2.LINE_AA)
+        # Draw YOLOv8 Arm Skeletons
+        for pt1, pt2 in self.cached_skeletons:
+            line_col = (239, 68, 68) if self.gesture_detected else (34, 197, 94)
+            cv2.line(frame, pt1, pt2, line_col, 2)
+            cv2.circle(frame, pt2, 4, (56, 189, 248), -1)
 
-        # Draw arm skeleton lines for gesture transparency
-        for pt1, pt2 in self.cached_landmarks:
-            line_color = (34, 197, 94) if not self.gesture_detected else (239, 68, 68)
-            cv2.line(frame, pt1, pt2, line_color, 3)
-            cv2.circle(frame, pt2, 5, (56, 189, 248), -1)
+        # Draw YOLOv8 Multi-Person Street Surveillance Bounding Boxes
+        for (x1, y1, x2, y2, conf, tag, is_sos) in self.cached_boxes:
+            color = (239, 68, 68) if is_sos else (56, 189, 248)
+            status_suffix = "SOS X-GESTURE" if is_sos else "Neutral"
+            label_str = f"{tag} | {conf}% [{status_suffix}]"
 
-        # Banner overlay when Raised Crossed-Hands SOS Gesture is detected
-        if self.gesture_detected:
-            cv2.rectangle(frame, (10, 42), (630, 82), (66, 32, 6), -1)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(frame, (x1, max(0, y1 - 22)), (min(frame.shape[1], x1 + 245), y1), (15, 23, 42), -1)
             cv2.putText(
                 frame,
-                f"RAISED CROSS-HANDS SOS GESTURE ({self.gesture_confidence}%) - CHECK CONFIRMATION",
-                (18, 67),
+                label_str,
+                (x1 + 5, max(14, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.46,
+                color,
+                1,
+                cv2.LINE_AA
+            )
+
+        # Top-Right Street Surveillance Telemetry HUD
+        hud_text = f"STREET HUD | Persons: {self.person_count}"
+        cv2.rectangle(frame, (430, 6), (632, 34), (15, 23, 42), -1)
+        cv2.putText(frame, hud_text, (440, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (56, 189, 248), 1, cv2.LINE_AA)
+
+        # Alert Banner if X-Gesture SOS is active
+        if self.gesture_detected:
+            cv2.rectangle(frame, (10, 42), (630, 80), (66, 32, 6), -1)
+            cv2.putText(
+                frame,
+                f"YOLOv8 SOS GESTURE DETECTED ({self.gesture_confidence}%) - 5s CONFIRMATION",
+                (18, 66),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (253, 230, 138),
@@ -312,16 +324,16 @@ class CameraManager:
                 preview_frame = frame.copy()
 
                 if self.ai_enabled:
-                    self._run_person_and_gesture_detection(preview_frame)
+                    self._run_yolov8_street_surveillance(preview_frame)
 
-                mode_str = "AI + GESTURE ON" if self.ai_enabled else "LIVE PREVIEW"
+                mode_str = "YOLOv8 STREET AI" if self.ai_enabled else "LIVE PREVIEW"
                 now_str = datetime.now().strftime(f"{mode_str} | %Y-%m-%d %H:%M:%S")
                 cv2.putText(
                     preview_frame,
                     now_str,
-                    (12, 26),
+                    (12, 25),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.58,
+                    0.54,
                     (34, 197, 94) if self.ai_enabled else (56, 189, 248),
                     2,
                     cv2.LINE_AA
@@ -356,15 +368,16 @@ class CameraManager:
 
             stamped_image = frame_to_save.copy()
             if self.ai_enabled:
-                for (x, y, w, h, conf, mode_tag) in self.cached_boxes:
-                    cv2.rectangle(stamped_image, (x, y), (x + w, y + h), (56, 189, 248), 2)
+                for (x1, y1, x2, y2, conf, tag, is_sos) in self.cached_boxes:
+                    color = (239, 68, 68) if is_sos else (56, 189, 248)
+                    cv2.rectangle(stamped_image, (x1, y1), (x2, y2), color, 2)
                     cv2.putText(
                         stamped_image,
-                        f"Person {conf}% [Neutral]",
-                        (x + 4, max(15, y - 6)),
+                        f"{tag} {conf}%",
+                        (x1 + 4, max(15, y1 - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
-                        (56, 189, 248),
+                        color,
                         2,
                         cv2.LINE_AA
                     )

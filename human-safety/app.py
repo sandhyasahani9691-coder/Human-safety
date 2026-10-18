@@ -36,7 +36,7 @@ def incidents_page():
 
 @app.route("/camera")
 def camera_page():
-    """Renders the Camera, AI Person/Gesture Detection & Explicit Photo Capture page."""
+    """Renders the Camera, YOLOv8 Street Surveillance & Explicit Photo Capture page."""
     cam_status = camera_manager.get_status()
     recent_photos = database.get_recent_photos(limit=4)
     return render_template(
@@ -44,13 +44,14 @@ def camera_page():
         active_page="camera",
         camera_active=cam_status["active"],
         ai_enabled=cam_status["ai_enabled"],
+        engine_name=cam_status["engine_name"],
         recent_photos=recent_photos
     )
 
 
 @app.route("/photos")
 def photos_page():
-    """Renders the Dedicated Photo Records Viewer & Gallery page (Milestone 4)."""
+    """Renders the Dedicated Photo Records Viewer & Gallery page."""
     search_query = request.args.get("q", "").strip()
     photos = database.get_all_photos(search_query)
     return render_template(
@@ -61,15 +62,26 @@ def photos_page():
     )
 
 
+@app.route("/contacts")
+def contacts_page():
+    """Renders the Emergency Contacts & Consent-Based Location Sharing page (Milestone 7)."""
+    contacts = database.get_emergency_contacts()
+    return render_template(
+        "contacts.html",
+        active_page="contacts",
+        contacts=contacts
+    )
+
+
 @app.route("/api/status", methods=["GET"])
 def system_status():
-    """Returns real-time backend health, camera state, and SQLite counts as JSON."""
+    """Returns real-time backend health, YOLOv8 state, and SQLite counts as JSON."""
     counts = database.get_incident_counts()
     cam_status = camera_manager.get_status()
     return jsonify({
         "status": "ONLINE",
         "backend": "Flask (Python " + platform.python_version() + ")",
-        "database": f"SQLite ({counts['open']} Open | {counts.get('photos', 0)} Photos)",
+        "database": f"SQLite ({counts['open']} Open | {counts.get('contacts', 0)} Contacts)",
         "camera_state": cam_status["state_label"],
         "camera_active": cam_status["active"],
         "microphone_state": "EXPLICIT BROWSER CONTROL",
@@ -77,12 +89,13 @@ def system_status():
         "session_started": SESSION_START_TIME,
         "simulated_incidents_total": counts["total"],
         "open_incidents": counts["open"],
-        "photos_total": counts.get("photos", 0)
+        "photos_total": counts.get("photos", 0),
+        "contacts_total": counts.get("contacts", 0)
     })
 
 
 # ==========================================
-# CAMERA, AI DETECTION & PHOTO API ROUTES
+# CAMERA, YOLOv8 & PHOTO API ROUTES
 # ==========================================
 
 @app.route("/api/camera/start", methods=["POST"])
@@ -90,7 +103,7 @@ def start_camera_route():
     """Explicitly starts the OpenCV webcam stream."""
     success, message = camera_manager.start_camera()
     if success:
-        print("[CAMERA] Webcam started by explicit user request.")
+        print(f"[CAMERA] {message}")
         return jsonify({"success": True, "active": True, "message": message})
     return jsonify({"success": False, "active": False, "error": message}), 500
 
@@ -105,7 +118,7 @@ def stop_camera_route():
 
 @app.route("/api/camera/ai-toggle", methods=["POST"])
 def toggle_ai_detection_route():
-    """Explicitly turns AI Person & Crossed-Hands Gesture Detection ON or OFF."""
+    """Explicitly turns YOLOv8 Street Surveillance & Gesture Detection ON or OFF."""
     data = request.get_json(silent=True) or {}
     enable_flag = bool(data.get("enabled", False))
 
@@ -113,7 +126,7 @@ def toggle_ai_detection_route():
     if not success:
         return jsonify({"success": False, "error": message}), 400
 
-    print(f"[AI VISION] Person & Gesture Detection set to {enable_flag}")
+    print(f"[YOLOv8 VISION] Street Surveillance set to {enable_flag}")
     return jsonify({
         "success": True,
         "ai_enabled": enable_flag,
@@ -123,7 +136,7 @@ def toggle_ai_detection_route():
 
 @app.route("/api/camera/ai-telemetry", methods=["GET"])
 def ai_telemetry_route():
-    """Returns real-time person count, confidence score, and gesture status."""
+    """Returns real-time YOLOv8 person count, confidence score, and gesture status."""
     return jsonify(camera_manager.get_ai_telemetry())
 
 
@@ -204,20 +217,57 @@ def delete_photo_route(photo_id):
 
 
 # ==========================================
-# INCIDENT API ROUTES (Milestones 2 & 6)
+# EMERGENCY CONTACTS API ROUTES (Milestone 7)
+# ==========================================
+
+@app.route("/api/contacts", methods=["POST"])
+def add_contact_route():
+    """Validates and saves a trusted emergency contact to SQLite."""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    relation = data.get("relation", "").strip()
+    phone = data.get("phone", "").strip()
+
+    if not name or not phone:
+        return jsonify({"success": False, "error": "Contact Name and Phone are required."}), 400
+    if len(name) > 60 or len(relation) > 40 or len(phone) > 25:
+        return jsonify({"success": False, "error": "Input exceeds maximum length."}), 400
+
+    contact = database.add_emergency_contact(name, relation or "Trusted Contact", phone)
+    print(f"[CONTACT ADDED] {contact['name']} ({contact['relation']}) -> {contact['phone']}")
+    return jsonify({"success": True, "contact": contact})
+
+
+@app.route("/api/contacts/<int:contact_id>", methods=["DELETE"])
+def delete_contact_route(contact_id):
+    """Deletes an emergency contact from SQLite."""
+    deleted = database.delete_emergency_contact(contact_id)
+    if deleted:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Contact not found."}), 404
+
+
+# ==========================================
+# INCIDENT & SIMULATED DISPATCH API ROUTES
 # ==========================================
 
 @app.route("/api/simulate-sos", methods=["POST"])
 def trigger_simulated_sos():
-    """Validates input and logs a simulated SOS incident (Manual, Voice, or Gesture) into SQLite."""
+    """Logs a simulated SOS incident with optional location consent and returns simulated dispatch summary."""
     data = request.get_json(silent=True) or {}
     reason = data.get("reason", "").strip()
     incident_type = data.get("incident_type", "SIMULATED_SOS").strip()
+    location_info = data.get("location_info", "").strip()
 
     if not reason:
         reason = "Manual Dashboard SOS Trigger (No note entered)"
     if len(reason) > 150:
         return jsonify({"success": False, "error": "Reason must be 150 characters or less."}), 400
+
+    if not location_info:
+        location_info = "Location Not Shared (Privacy Lock)"
+    elif len(location_info) > 120:
+        location_info = location_info[:120]
 
     allowed_types = [
         "SIMULATED_SOS",
@@ -230,8 +280,25 @@ def trigger_simulated_sos():
     if incident_type not in allowed_types:
         incident_type = "SIMULATED_SOS"
 
-    record = database.create_incident(incident_type=incident_type, reason=reason)
-    print(f"[SQLITE LOG] Created {record['incident_code']} ({record['incident_type']}) at {record['timestamp']}")
+    record = database.create_incident(
+        incident_type=incident_type,
+        reason=reason,
+        location_info=location_info
+    )
+
+    # Fetch trusted contacts to build a Simulated Dispatch Preview (no real SMS sent)
+    contacts = database.get_emergency_contacts()
+    recipient_names = [f"{c['name']} ({c['phone']})" for c in contacts]
+    dispatch_summary = (
+        f"Simulated alert prepared for {len(contacts)} contact(s): {', '.join(recipient_names)}"
+        if contacts
+        else "No emergency contacts configured yet (Add contacts in Menu #5)."
+    )
+
+    print(
+        f"[SQLITE LOG] Created {record['incident_code']} ({record['incident_type']}) | "
+        f"Loc: {location_info} | {dispatch_summary}"
+    )
 
     return jsonify({
         "success": True,
@@ -239,7 +306,9 @@ def trigger_simulated_sos():
         "timestamp": record["timestamp"],
         "type": record["incident_type"],
         "reason": record["reason"],
-        "message": "Saved permanently to local SQLite database (safety_records.db)."
+        "location_info": record["location_info"],
+        "dispatch_summary": dispatch_summary,
+        "message": "Saved to local SQLite database. Dispatch simulated locally."
     })
 
 

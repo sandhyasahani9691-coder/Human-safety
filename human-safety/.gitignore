@@ -17,6 +17,10 @@ instance/
 static/captures/
 captures/
 
+# YOLOv8 Pretrained Model Weights (Auto-downloaded locally)
+*.pt
+*.onnx
+
 # Environment variables and secrets
 .env
 

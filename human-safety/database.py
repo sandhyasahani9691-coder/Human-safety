@@ -12,11 +12,11 @@ def get_db_connection():
 
 
 def init_db():
-    """Creates the required tables if they do not exist yet."""
+    """Creates the required tables and runs safe column migrations."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Table 1: Simulated Incidents (Milestone 2)
+    # Table 1: Simulated Incidents (Milestones 2, 6, 7)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,11 +24,19 @@ def init_db():
             timestamp TEXT NOT NULL,
             incident_type TEXT NOT NULL,
             reason TEXT NOT NULL,
+            location_info TEXT NOT NULL DEFAULT 'Location Not Shared (Privacy Lock)',
             status TEXT NOT NULL DEFAULT 'OPEN'
         )
     """)
 
-    # Table 2: Captured Photo Records (Milestone 3 & 4)
+    # Safe migration if 'incidents' table was created in an earlier milestone without location_info
+    existing_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(incidents)").fetchall()]
+    if "location_info" not in existing_cols:
+        cursor.execute(
+            "ALTER TABLE incidents ADD COLUMN location_info TEXT NOT NULL DEFAULT 'Location Not Shared (Privacy Lock)'"
+        )
+
+    # Table 2: Captured Photo Records (Milestones 3 & 4)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS photo_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,23 +47,35 @@ def init_db():
         )
     """)
 
+    # Table 3: Trusted Emergency Contacts (Milestone 7)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS emergency_contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            relation TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
     conn.commit()
     conn.close()
 
 
 # ==========================================
-# INCIDENT FUNCTIONS (Milestone 2)
+# INCIDENT FUNCTIONS
 # ==========================================
 
-def create_incident(incident_type: str, reason: str) -> dict:
-    """Inserts a new simulated safety incident and generates a readable code."""
+def create_incident(incident_type: str, reason: str, location_info: str = "Location Not Shared (Privacy Lock)") -> dict:
+    """Inserts a new simulated safety incident with optional consent-based location."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute(
-        "INSERT INTO incidents (incident_code, timestamp, incident_type, reason, status) VALUES (?, ?, ?, ?, ?)",
-        ("PENDING", timestamp, incident_type, reason, "OPEN")
+        """INSERT INTO incidents (incident_code, timestamp, incident_type, reason, location_info, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("PENDING", timestamp, incident_type, reason, location_info, "OPEN")
     )
     new_id = cursor.lastrowid
     incident_code = f"INC-{new_id:04d}"
@@ -73,6 +93,7 @@ def create_incident(incident_type: str, reason: str) -> dict:
         "timestamp": timestamp,
         "incident_type": incident_type,
         "reason": reason,
+        "location_info": location_info,
         "status": "OPEN"
     }
 
@@ -86,9 +107,9 @@ def get_all_incidents(search_query: str = "", status_filter: str = "ALL") -> lis
     params = []
 
     if search_query:
-        query += " AND (reason LIKE ? OR incident_code LIKE ? OR incident_type LIKE ?)"
+        query += " AND (reason LIKE ? OR incident_code LIKE ? OR incident_type LIKE ? OR location_info LIKE ?)"
         wildcard = f"%{search_query}%"
-        params.extend([wildcard, wildcard, wildcard])
+        params.extend([wildcard, wildcard, wildcard, wildcard])
 
     if status_filter in ("OPEN", "RESOLVED"):
         query += " AND status = ?"
@@ -127,18 +148,24 @@ def delete_incident(incident_id: int) -> bool:
 
 
 def get_incident_counts() -> dict:
-    """Returns total, open incident, and photo counts for dashboard telemetry."""
+    """Returns total, open incident, photo, and emergency contact counts."""
     conn = get_db_connection()
     cursor = conn.cursor()
     total = cursor.execute("SELECT COUNT(*) FROM incidents").fetchone()[0]
     open_count = cursor.execute("SELECT COUNT(*) FROM incidents WHERE status = 'OPEN'").fetchone()[0]
     photo_count = cursor.execute("SELECT COUNT(*) FROM photo_records").fetchone()[0]
+    contact_count = cursor.execute("SELECT COUNT(*) FROM emergency_contacts").fetchone()[0]
     conn.close()
-    return {"total": total, "open": open_count, "photos": photo_count}
+    return {
+        "total": total,
+        "open": open_count,
+        "photos": photo_count,
+        "contacts": contact_count
+    }
 
 
 # ==========================================
-# PHOTO RECORD FUNCTIONS (Milestone 3 & 4)
+# PHOTO RECORD FUNCTIONS
 # ==========================================
 
 def create_photo_record(filename: str, label: str) -> dict:
@@ -234,3 +261,48 @@ def delete_photo_record(photo_id: int) -> str | None:
     conn.commit()
     conn.close()
     return filename
+
+
+# ==========================================
+# EMERGENCY CONTACTS FUNCTIONS (Milestone 7)
+# ==========================================
+
+def add_emergency_contact(name: str, relation: str, phone: str) -> dict:
+    """Adds a trusted emergency contact to SQLite for simulated SOS dispatch."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        "INSERT INTO emergency_contacts (name, relation, phone, created_at) VALUES (?, ?, ?, ?)",
+        (name, relation, phone, created_at)
+    )
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {
+        "id": new_id,
+        "name": name,
+        "relation": relation,
+        "phone": phone,
+        "created_at": created_at
+    }
+
+
+def get_emergency_contacts() -> list:
+    """Returns all saved emergency contacts."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    rows = cursor.execute("SELECT * FROM emergency_contacts ORDER BY id ASC").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def delete_emergency_contact(contact_id: int) -> bool:
+    """Deletes an emergency contact from SQLite."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM emergency_contacts WHERE id = ?", (contact_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
